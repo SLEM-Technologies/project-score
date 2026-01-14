@@ -1,0 +1,7 @@
+FROM node:18.15.0-alpine as BASE_IMAGE
+
+WORKDIR /code
+
+COPY package.json package-lock.json ./
+
+RUN npm ci || ( cat /root/.npm/_logs/*.log; exit 1)

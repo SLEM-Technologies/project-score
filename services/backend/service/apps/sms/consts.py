@@ -14,7 +14,7 @@ class SMSHistoryStatus(models.TextChoices):
 
 SMS_TEMPLATES_CACHE_KEY = 'sms_templates_cache_key'
 # Reduced from 700 to 100 to avoid Dialpad API rate limits (fixes 403 errors)
-SMS_LIMIT_PER_MINUTE = 200
+SMS_LIMIT_PER_MINUTE = 100
 PHONE_CODE = '+1'
 PERIOD_TO_DISPLAY_REMINDERS_IN_YEARS = 3
 MIN_EXPIRY_PERIOD_IN_WEEKS = 7

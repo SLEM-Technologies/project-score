@@ -1,0 +1,90 @@
+parameters:
+  - name: BUILD_REASON
+    type: string
+    default: $(Build.Reason)
+  - name: ACR_SC_NAME
+    type: string 
+  - name: REGISTRY
+    type: string 
+  - name: APP_IMAGE_REPO
+    type: string 
+  - name: BASE_IMAGE_REPO
+    type: string 
+  - name: BASE_DIFF_FILES
+    type: string 
+  - name: APP_DOCKER_FILE
+    type: string 
+  - name: BASE_DOCKER_FILE
+    type: string 
+  - name: REACT_APP_API_URL
+    type: string
+
+steps:
+  - checkout: self
+    clean: true
+
+  - task: Bash@3
+    name: getTag
+    displayName: 'Get TAG variable'
+    inputs:
+      filePath: '$(Build.SourcesDirectory)/devops/scripts/get_tag.sh'
+      arguments: "'${{ parameters.BUILD_REASON }}' '$(Build.SourceBranch)' '$(Build.SourceVersion)' 'true' '' 'true' '${{ parameters.BASE_DIFF_FILES }}'"
+
+  # Login to the registry
+  - task: Docker@2
+    displayName: 'Login to ACR'
+    inputs:
+      command: 'login'
+      containerRegistry: ${{ parameters.ACR_SC_NAME }}
+
+  # Build and push BASE image to the registry
+  - task: Bash@3
+    displayName: 'Build and Push ${{ parameters.BASE_IMAGE_REPO }} image'
+    inputs:
+      targetType: inline
+      script: |
+        set -e
+        # Define BASE image relevant variables
+        BASE_IMAGE_NO_TAG="${{ parameters.REGISTRY }}/${{ parameters.BASE_IMAGE_REPO }}"
+        BASE_IMAGE="${BASE_IMAGE_NO_TAG}:$(getTag.BASE_TAG)"
+        BASE_IMAGE_LATEST="${BASE_IMAGE_NO_TAG}:latest"
+        echo ''
+        echo "-> Base tag [$(getTag.BASE_TAG)]"
+        echo "   Base image [$BASE_IMAGE]"
+        echo "   Base latest image [$BASE_IMAGE_LATEST]"
+        echo "##vso[task.setvariable variable=BASE_IMAGE]${BASE_IMAGE}"
+
+        # Trying to pull an image with a tag with package files hash. If it doesn't exist we build it.
+        set +e
+        echo ''; echo "-> Pulling image [${BASE_IMAGE}]..."
+        docker pull ${BASE_IMAGE}
+        if [ $? -eq 0 ]
+        then
+          echo ''; echo '-> Image pull successful'
+        else
+          set -e
+          echo ''; echo "-> Image pull failed - building image [${BASE_IMAGE}]"
+          docker build --no-cache -f devops/docker/${{ parameters.BASE_DOCKER_FILE }} -t ${BASE_IMAGE} --progress=plain .
+          docker push ${BASE_IMAGE}
+          docker tag ${BASE_IMAGE} ${BASE_IMAGE_LATEST}
+          docker push ${BASE_IMAGE_LATEST}
+        fi
+
+  # Build and push APP image to the registry
+  - task: Bash@3
+    displayName: 'Build and Push ${{ parameters.APP_IMAGE_REPO }} image'
+    inputs:
+      targetType: inline
+      script: |
+        set -e
+
+        # Define APP image relevant variables
+        APP_IMAGE_NO_TAG="${{ parameters.REGISTRY }}/${{ parameters.APP_IMAGE_REPO }}"
+        APP_IMAGE="${APP_IMAGE_NO_TAG}:$(getTag.TAG)"
+        APP_IMAGE_LATEST="${APP_IMAGE_NO_TAG}:latest"
+
+        echo ''; echo "-> Building app image [${APP_IMAGE}]"
+        docker build --no-cache -f devops/docker/${{ parameters.APP_DOCKER_FILE }} --build-arg BASE_IMAGE=$(BASE_IMAGE) --build-arg REACT_APP_API_URL=${{ parameters.REACT_APP_API_URL }} -t ${APP_IMAGE} --progress=plain  .
+        docker push ${APP_IMAGE}
+        docker tag  ${APP_IMAGE} ${APP_IMAGE_LATEST}
+        docker push ${APP_IMAGE_LATEST}

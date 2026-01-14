@@ -1,0 +1,24 @@
+parameters:
+  - name: APP_NAME
+    type: string 
+  - name: ARM_SC_NAME
+    type: string
+  - name: CAPP_RG
+    type: string
+  - name: CAPP_NAME
+    type: string
+  - name: REGISTRY
+    type: string
+  - name: APP_IMAGE_REPO
+    type: string 
+  - name: TAG
+    type: string
+
+steps:
+  - task: AzureContainerApps@1
+    displayName: 'Deploy ${{ parameters.CAPP_NAME }}'
+    inputs:
+      azureSubscription: ${{ parameters.ARM_SC_NAME }}
+      resourceGroup: ${{ parameters.CAPP_RG }}
+      containerAppName: ${{ parameters.CAPP_NAME }}
+      imageToDeploy: ${{ parameters.REGISTRY }}/${{ parameters.APP_IMAGE_REPO }}:${{ parameters.TAG }}
