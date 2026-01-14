@@ -1,0 +1,147 @@
+trigger:
+  branches:
+    include:
+      - dev
+  tags:
+    include:
+      - "*"
+  paths:
+    exclude:
+    - /devops/**/*.yaml
+
+
+# No PR triggers
+pr: none
+
+parameters:
+  - name: ENV_NAME
+    displayName: "Deploy to Environment:"
+    type: string
+    default: "none"
+    values: ["dev", "prod","none"]
+  - name: RUN_DB_MIGRATION
+    displayName: Run DB migration
+    type: boolean
+    default: true
+
+variables:
+  - name: APP_NAME
+    value: backend
+  - name: DOCKER_FILE
+    value: "Dockerfile.app"
+  - name: ACR_SC_NAME
+    value: vs-acr-sc
+  - name: REGISTRY
+    value: "vscentralacr.azurecr.io"
+  - name: REPOSITORY
+    value: "vs_backend"
+
+  - name: ARM_SC_NAME
+    ? ${{ if or(
+          eq(parameters['ENV_NAME'], 'dev'),
+          eq(parameters['ENV_NAME'], 'none')
+        ) }}
+    : value: "vs-arm-sc"
+    ${{ if eq(parameters['ENV_NAME'], 'prod') }}:
+      value: "vs-arm-prod-sc"
+
+  - name: CAPP_RG
+    ? ${{ if or(
+        and(
+          eq(parameters['ENV_NAME'], 'dev'),
+          in(variables['Build.Reason'], 'Manual')
+        ),
+        and(
+          or(
+            eq(variables['Build.SourceBranch'], 'refs/heads/dev'),
+            startsWith(variables['Build.SourceBranch'], 'refs/tags/')
+          ),
+          in( variables['Build.Reason'], 'IndividualCI', 'BatchedCI', 'PullRequest')
+        )
+     ) }}
+    : value: "dev-rg"
+    ${{ if eq(parameters['ENV_NAME'], 'prod') }}:
+      value: "prod-rg"
+
+  - name: CAPP_NAME
+    ? ${{ if or(
+        and(
+          eq(parameters['ENV_NAME'], 'dev'),
+          in(variables['Build.Reason'], 'Manual')
+        ),
+        and(
+          eq(variables['Build.SourceBranch'], 'refs/heads/dev'),
+          in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI', 'PullRequest')
+        )
+     ) }}
+    : value: "dev-backend"
+    ${{ if eq(parameters['ENV_NAME'], 'prod') }}:
+      value: "prod-backend"
+
+  - name: CELERY_CAPP_NAME
+    ? ${{ if or(
+        and(
+          eq(parameters['ENV_NAME'], 'dev'),
+          in(variables['Build.Reason'], 'Manual')
+        ),
+        and(
+          eq(variables['Build.SourceBranch'], 'refs/heads/dev'),
+          in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI', 'PullRequest')
+        )
+     ) }}
+    : value: "dev-celery"
+    ${{ if eq(parameters['ENV_NAME'], 'prod') }}:
+      value: "prod-celery"
+
+  - name: DB_MIGRATION_JOB_NAME
+    ? ${{ if or(
+        and(
+          eq(parameters['ENV_NAME'], 'dev'),
+          in(variables['Build.Reason'], 'Manual')
+        ),
+        and(
+          eq(variables['Build.SourceBranch'], 'refs/heads/dev'),
+          in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI', 'PullRequest')
+        )
+     ) }}
+    : value: "dev-db-migration-job"
+    ${{ if eq(parameters['ENV_NAME'], 'prod') }}:
+      value: "prod-db-migration-job"
+
+  - name: LAWS_ID
+    ${{ if ne(parameters['ENV_NAME'], 'prod') }}:
+      value: "298ee55e-02ba-4854-85d8-72f5beb700ff"
+    ${{ if eq(parameters['ENV_NAME'], 'prod') }}:
+      value: "36e36bc7-cd7f-4566-8178-42740d925c3f"
+
+# Pool
+pool:
+  vmImage: "ubuntu-22.04"
+
+jobs:
+  - job: BuildandDeployImage
+    displayName: "Build and Deploy App image"
+    timeoutInMinutes: 0
+    cancelTimeoutInMinutes: 5
+    steps:
+      - template: templates/build.yaml
+        parameters:
+          APP_NAME: $(APP_NAME)
+          ACR_SC_NAME: $(ACR_SC_NAME)
+          REPOSITORY: $(REPOSITORY)
+          DOCKER_FILE: $(DOCKER_FILE)
+
+      - ${{ if or(ne(parameters.ENV_NAME, 'none'), in( variables['Build.Reason'], 'IndividualCI', 'BatchedCI', 'PullRequest')) }}:
+        - template: templates/deploy.yaml
+          parameters:
+            APP_NAME: $(APP_NAME)
+            ARM_SC_NAME: $(ARM_SC_NAME)
+            CAPP_RG: $(CAPP_RG)
+            CAPP_NAME: $(CAPP_NAME)
+            CELERY_CAPP_NAME: $(CELERY_CAPP_NAME)
+            RUN_DB_MIGRATION: ${{ parameters.RUN_DB_MIGRATION }}
+            DB_MIGRATION_JOB_NAME: $(DB_MIGRATION_JOB_NAME)
+            REGISTRY: $(REGISTRY)
+            REPOSITORY: $(REPOSITORY)
+            TAG: $(getTag.TAG)
+            #LAWS_ID: $(LAWS_ID)

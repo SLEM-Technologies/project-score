@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    hostname: ${POSTGRES_HOST}
+    container_name: ${PROJECT_NAME}-db
+    env_file:
+      - ./.env
+    ports:
+      - ${POSTGRES_DOCKER_PORT}:${POSTGRES_PORT}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  backend: &backend
+    image: ${PROJECT_NAME}-backend
+    container_name: ${PROJECT_NAME}-backend
+    user: appuser
+    build: services/backend/
+    env_file:
+      - ./.env
+    ports:
+      - ${DJANGO_DOCKER_PORT}:${HOST_PORT}
+    volumes:
+      - ./services/backend/service:/home/appuser/project/service
+    depends_on:
+      - db
+    working_dir: /home/appuser/project/service
+    command: /bin/bash -c '
+      chmod +x ../wait-for.sh &&
+      ../wait-for.sh ${POSTGRES_HOST}:${POSTGRES_PORT} &&
+      python manage.py migrate &&
+      python manage.py collectstatic --no-input &&
+      python manage.py runserver ${HOST_IP}:${HOST_PORT}'
+
+  redis:
+    container_name: ${PROJECT_NAME}-redis
+    image: redis:7-alpine
+    expose:
+      - 6379
+    volumes:
+      - redis-data:/data
+
+  beat:
+    <<: *backend
+    container_name: ${PROJECT_NAME}-beat
+    ports: [ ]
+    depends_on:
+      - redis
+      - db
+    working_dir: /home/appuser/project/service
+    entrypoint: ['celery']
+    command: ['-A', 'libs.celery.celery', 'beat', '--loglevel=DEBUG']
+
+  worker:
+    <<: *backend
+    container_name: ${PROJECT_NAME}-worker
+    ports: [ ]
+    depends_on:
+      - redis
+      - db
+    working_dir: /home/appuser/project/service
+    entrypoint: ['celery']
+    command: ['-A', 'libs.celery.celery', 'worker', '-Q', 'low,email,sms', '--loglevel=DEBUG']
+
+volumes:
+  pg-data:
+  redis-data:

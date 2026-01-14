@@ -1,0 +1,50 @@
+# core
+django==4.2.8
+django-filter==23.4
+django-redis==5.2.0
+
+# REST API
+djangorestframework==3.14.0
+
+# env
+python-decouple==3.8
+
+# DB
+psycopg==3.1.14
+
+# auth
+djangorestframework-simplejwt==5.3.0
+
+# doc
+drf-spectacular==0.26.5
+
+# deploy
+gunicorn==21.2.0
+
+# staticfiles
+whitenoise==6.6.0
+
+# datetime
+arrow==1.3.0
+python-dateutil==2.8.2
+holidays==0.41
+
+# integrations
+python-dialpad==2.2.2
+azure-storage-blob==12.19.0
+
+# async tasks
+celery==5.3.6
+django-celery-results==2.5.1
+
+# emails
+django-anymail[sendgrid]==10.2
+
+# security
+django-cryptography==1.1  # (deprecated, remains for migration consistency)
+
+# logging
+sentry-sdk[django]==1.42.0
+
+# admin
+django-jsonform==2.22.0

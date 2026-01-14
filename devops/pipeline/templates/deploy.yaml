@@ -1,0 +1,86 @@
+parameters:
+  - name: APP_NAME
+    type: string
+  - name: ARM_SC_NAME
+    type: string
+  - name: CAPP_RG
+    type: string
+  - name: CAPP_NAME
+    type: string
+  - name: CELERY_CAPP_NAME
+    type: string
+  - name: RUN_DB_MIGRATION
+    type: boolean
+  - name: DB_MIGRATION_JOB_NAME
+    type: string
+  - name: REGISTRY
+    type: string
+  - name: REPOSITORY
+    type: string
+  - name: TAG
+    type: string
+  - name: TIMEOUT
+    type: string
+    default: '600'
+  # - name: LAWS_ID
+  #   type: string
+
+
+steps:
+  - ${{ if eq(parameters.RUN_DB_MIGRATION, true) }}:
+    - task: AzureCLI@2
+      displayName: 'Run ${{ parameters.DB_MIGRATION_JOB_NAME }}'
+      inputs:
+        azureSubscription: ${{ parameters.ARM_SC_NAME }}
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az containerapp job update --name ${{ parameters.DB_MIGRATION_JOB_NAME }} --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }}
+          $ctAppJobExecution = (az containerapp job start --name ${{ parameters.DB_MIGRATION_JOB_NAME }} --resource-group ${{ parameters.CAPP_RG }} --query [id] -o tsv).Split('/')[-1]
+          Write-Host "Job Execution name is [$ctAppJobExecution]"
+          $startTime = Get-Date
+          do {
+              Start-Sleep -Seconds 10
+              $status = az containerapp job execution show --job-execution-name $ctAppJobExecution --name ${{ parameters.DB_MIGRATION_JOB_NAME }} --resource-group ${{ parameters.CAPP_RG }} --query [properties.status] -o tsv
+              Write-Host "Job Execution status is [$status]"
+              if ($status -eq 'Failed') {
+                  Write-Error "DB migration job failed."
+                  exit 1
+              }
+
+              $elapsedTime = (Get-Date) - $startTime
+              if ($elapsedTime.TotalSeconds -ge ${{ parameters.TIMEOUT }}) {
+                  Write-Error "Timeout reached. DB migration lob execution did not complete within the specified time."
+                  exit 1
+              }
+          } while ($status -ne 'Succeeded')
+          # az monitor log-analytics query --workspace LAWS_ID --analytics-query "ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith `'$ctAppJobExecution`' | sort by TimeGenerated asc | project TimeGenerated, Log_s" --out table
+
+  - task: AzureCLI@2
+    displayName: 'Deploy ${{ parameters.CAPP_NAME }}'
+    inputs:
+      azureSubscription: ${{ parameters.ARM_SC_NAME }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        az containerapp update --name ${{ parameters.CAPP_NAME }} --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }} --revision-suffix ${{ parameters.TAG }}
+
+  - task: AzureCLI@2
+    displayName: 'Deploy ${{ parameters.CELERY_CAPP_NAME }}'
+    inputs:
+      azureSubscription: ${{ parameters.ARM_SC_NAME }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -e
+
+        if [[ "${{ parameters.CELERY_CAPP_NAME }}" == "prod-celery" ]]; then
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }}-worker --container-name "${{ parameters.CELERY_CAPP_NAME }}-worker" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }}
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }}-worker --container-name "${{ parameters.CELERY_CAPP_NAME }}-worker" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }} --revision-suffix ${{ parameters.TAG }}
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }}-beat --container-name "${{ parameters.CELERY_CAPP_NAME }}-beat" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }}
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }}-beat --container-name "${{ parameters.CELERY_CAPP_NAME }}-beat" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }} --revision-suffix ${{ parameters.TAG }}
+        else
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }} --container-name "${{ parameters.CELERY_CAPP_NAME }}-worker" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }}
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }} --container-name "${{ parameters.CELERY_CAPP_NAME }}-beat" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }}
+          az containerapp update --name ${{ parameters.CELERY_CAPP_NAME }} --container-name "${{ parameters.CELERY_CAPP_NAME }}-worker" --resource-group ${{ parameters.CAPP_RG }} --image ${{ parameters.REGISTRY }}/${{ parameters.REPOSITORY }}:${{ parameters.TAG }} --revision-suffix ${{ parameters.TAG }}
+        fi

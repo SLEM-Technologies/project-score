@@ -1,0 +1,42 @@
+parameters:
+  - name: BUILD_REASON
+    type: string
+    default: $(Build.Reason)
+  - name: APP_NAME
+    type: string 
+  - name: REPOSITORY
+    type: string
+  - name: DOCKER_FILE
+    type: string
+  - name: ACR_SC_NAME
+    type: string
+
+steps:
+  - checkout: self
+    clean: true
+
+  - task: Bash@3
+    name: getTag
+    displayName: 'Get TAG variable'
+    inputs:
+      filePath: '$(Build.SourcesDirectory)/devops/scripts/get_tag.sh'
+      arguments: "$(Build.SourceBranch) $(Build.SourceVersion) true"
+
+  # Build image and push to the registry
+  - task: Docker@2
+    displayName: 'Login to ACR'
+    inputs:
+      command: 'login'
+      containerRegistry: ${{ parameters.ACR_SC_NAME }}
+
+  - task: Docker@2
+    displayName: 'Build and Push ${{ parameters.APP_NAME }} image'
+    inputs:
+      command: 'buildAndPush'
+      Dockerfile: '$(Build.SourcesDirectory)/devops/docker/${{ parameters.DOCKER_FILE }}'
+      buildContext: '$(Build.SourcesDirectory)'
+      repository: ${{ parameters.REPOSITORY }}
+      tags: |
+        $(getTag.TAG)
+        latest
+      addPipelineData: false
